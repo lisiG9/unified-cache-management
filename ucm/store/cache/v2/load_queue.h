@@ -240,6 +240,7 @@ private:
         }
         Detail::TaskDesc backendTask;
         backendTask.brief = "Backend2Cache";
+        backendTask.memoryType = Detail::TaskDesc::MemoryType::DDR;
         backendTask.push_back(Detail::Shard{shard.owner, shard.index, {handle.Data()}});
         auto res = backend_->Load(std::move(backendTask));
         if (!res) [[unlikely]] {

@@ -710,3 +710,67 @@ class DCPRecoveryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NdsStoreCreationTests(unittest.TestCase):
+    def test_scheduler_finalizes_store_and_uses_whole_block_shard(self):
+        from unittest.mock import Mock
+        import copy
+
+        tree = ast.parse(MODULE.read_text(encoding="utf-8-sig"))
+        connector = next(
+            n
+            for n in tree.body
+            if isinstance(n, ast.ClassDef) and n.name == "UCMDirectConnector"
+        )
+        method = next(
+            n
+            for n in connector.body
+            if isinstance(n, ast.FunctionDef) and n.name == "_create_store"
+        )
+        node = ast.ClassDef(
+            name="DirectConnector", bases=[], keywords=[], body=[method], decorator_list=[]
+        )
+        store = SimpleNamespace(finalize_registration=Mock())
+        factory = SimpleNamespace(create_connector=Mock(return_value=store))
+        namespace = {
+            "copy": copy,
+            "KVConnectorRole": SimpleNamespace(WORKER=object()),
+            "_scheduler_read_block_size": lambda: 4096,
+            "UcmConnectorFactoryV1": factory,
+            "logger": SimpleNamespace(info=lambda *args: None),
+        }
+        code = ast.Module(
+            body=[
+                ast.ImportFrom(
+                    module="__future__", names=[ast.alias(name="annotations")], level=0
+                ),
+                node,
+            ],
+            type_ignores=[],
+        )
+        exec(compile(ast.fix_missing_locations(code), str(MODULE), "exec"), namespace)
+        worker = namespace["DirectConnector"]()
+        worker.connector_configs = [
+            {
+                "ucm_connector_name": "UcmPipelineStore",
+                "ucm_connector_config": {"store_pipeline": "Cache|Nds"},
+            }
+        ]
+        worker.is_mla = True
+        worker.unique_id = "test"
+        worker._role = object()
+        worker._gc_owner = True
+        worker._is_pp = False
+        worker._get_world_size = lambda: 8
+        worker._configure_numa_placement = lambda config: None
+        worker._set_default_shm_buffer_capacity = lambda config: None
+
+        result = worker._create_store(None)
+
+        self.assertIs(result, store)
+        store.finalize_registration.assert_called_once_with()
+        config = factory.create_connector.call_args.args[1]
+        self.assertEqual(config["block_size"], 4096)
+        self.assertEqual(config["shard_size"], 4096)
+        self.assertEqual(config["store_pipeline"], "Cache|Nds")

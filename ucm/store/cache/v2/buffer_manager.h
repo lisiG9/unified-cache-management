@@ -45,6 +45,7 @@ public:
         return buffer_.Setup(config);
     }
     BufferT* GetTransBuffer() { return &buffer_; }
+    Expected<std::vector<Detail::HostBufferSpan>> HostBuffers() { return buffer_.HostBuffers(); }
     Expected<std::vector<uint8_t>> Lookup(const Detail::BlockId* blocks, size_t num)
     {
         std::vector<uint8_t> hits(num, false);

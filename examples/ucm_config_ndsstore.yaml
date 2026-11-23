@@ -1,0 +1,35 @@
+# GLM direct whole-block Cache|Nds configuration example.
+#
+# The native plugin is optional at build time:
+#   cmake -DBUILD_UCM_NDS=ON -DNDS_ROOT=/path/to/pynds_kv ...
+# No Python pynds_kv package is used. At runtime, libndskv.so and its SDK
+# dependencies must be discoverable through LD_LIBRARY_PATH or an installation
+# beside libndsstore.so. No .so path belongs in this YAML.
+# After activation, destroy Cache|Nds pipelines only during process teardown;
+# hot-destroying or recreating an NDS client in a continuing process is unsupported.
+
+ucm_connectors:
+  - ucm_connector_name: "UcmPipelineStore"
+    ucm_connector_config:
+      store_pipeline: "Cache|Nds"
+      nds_config_path: "/etc/nds/nds_config.conf"
+      nds_nsid: 11
+      nds_mr_policy: "direct"  # direct | direct_only | staging
+      nds_staging_capacity_gb: 16  # one shared allocation per process
+      nds_load_workers: 4
+      nds_dump_workers: 4
+      nds_queue_depth: 1024
+      nds_warmup_on_init: true
+      store_health:
+        enabled: true
+
+# GLM direct whole-block only. The connector supplies device_id, block_size,
+# shard_size and tensor_size_list; the scheduler uses lookup-only registration.
+use_layerwise: false
+enable_event_sync: true
+
+# Required sibling file: /etc/nds/nds_wrapper.conf.
+# Set value_size_kb_nsid11 to the direct shard size, and ensure that size is a
+# common multiple of read_batch_size_kb and write_batch_size_kb. If the geometry
+# is not direct-compatible, value_size must instead equal the aligned staging
+# size; direct falls back explicitly and direct_only rejects the configuration.

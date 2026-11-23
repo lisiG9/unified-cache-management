@@ -38,6 +38,7 @@
 #include "ctrl_layout.h"
 #include "data_backend.h"
 #include "data_backend_memfd.h"
+#include "host_buffer.h"
 #include "logger/logger.h"
 #include "numa/numa_policy.h"
 #include "status/status.h"
@@ -62,6 +63,7 @@ struct DataOptions {
 class DataStrategy {
     size_t slotSize_{};
     size_t nSlotsPerRank_{};
+    size_t rankCount_{};
     std::unique_ptr<DataBackend> backend_;
 
     /* Every platform shares the memfd data plane. */
@@ -223,8 +225,26 @@ public:
         }
         slotSize_ = slotSize;
         nSlotsPerRank_ = nSlotsPerRank;
+        rankCount_ = nRanks;
         backend_ = std::move(backend);
         return Status::OK();
+    }
+
+    Expected<std::vector<Detail::HostBufferSpan>> HostBuffers()
+    {
+        std::vector<Detail::HostBufferSpan> spans;
+        if (backend_ == nullptr) { return std::move(spans); }
+        spans.reserve(rankCount_);
+        for (size_t rank = 0; rank < rankCount_; ++rank) {
+            auto* addr = backend_->HostAddrOf(rank);
+            const auto bytes = backend_->HostMappedBytesOf(rank);
+            if (addr == nullptr || bytes == 0) {
+                return Status::Error("cache2 host mapping is unavailable at rank " +
+                                     std::to_string(rank));
+            }
+            spans.push_back(Detail::HostBufferSpan{addr, bytes, slotSize_, nSlotsPerRank_});
+        }
+        return std::move(spans);
     }
 
     // True when the slot has a CPU/IO-accessible address; callers must then

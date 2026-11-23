@@ -185,6 +185,11 @@ public:
         return data_.Setup(layout, dataOptions);
     }
 
+    Expected<std::vector<Detail::HostBufferSpan>> HostBuffers()
+    {
+        return data_.HostBuffers();
+    }
+
     // Requires successful worker-side Setup; observers must not call Get.
     // Waits for a slot reference and always returns a valid handle, not necessarily Ready.
     Handle Get(const Detail::BlockId& blockId, size_t offset, bool allowReserved = false,

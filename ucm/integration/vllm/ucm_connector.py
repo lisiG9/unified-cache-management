@@ -1963,6 +1963,9 @@ class UCMDirectConnector(KVConnectorBase_V1):
                 )
                 logger.warning(f"Falling back to manual block_size estimate: {bs}")
             config["block_size"] = bs
+            if config.get("store_pipeline") == "Cache|Nds":
+                # GLM direct whole-block has one physical shard per block.
+                config.setdefault("shard_size", bs)
         config["posix_gc_enable"] = self._gc_owner
         if getattr(self, "_is_pp", False):
             layer_start = self.first_layer_id
@@ -1979,7 +1982,11 @@ class UCMDirectConnector(KVConnectorBase_V1):
                 "layer_count": layer_count,
             }
         logger.info(f"create {name} with config: {config}")
-        return UcmConnectorFactoryV1.create_connector(name, config, module_path)
+        store = UcmConnectorFactoryV1.create_connector(name, config, module_path)
+        finalize_registration = getattr(store, "finalize_registration", None)
+        if callable(finalize_registration):
+            finalize_registration()
+        return store
 
     @property
     def _dp_rank(self) -> int:

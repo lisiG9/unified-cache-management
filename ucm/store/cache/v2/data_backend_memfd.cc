@@ -242,6 +242,12 @@ void* MemfdDataBackend::HostAddrOf(size_t rank) const
     return segments_[rank].mem->Addr();
 }
 
+size_t MemfdDataBackend::HostMappedBytesOf(size_t rank) const
+{
+    if (rank >= segments_.size() || segments_[rank].mem == nullptr) { return 0; }
+    return segments_[rank].mem->Size();
+}
+
 void* MemfdDataBackend::DeviceAddrOf(size_t rank) const
 {
     (void)rank;

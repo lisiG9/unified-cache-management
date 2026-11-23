@@ -84,6 +84,7 @@ public:
     Status ImportPeer(size_t rank, uint64_t handle) override;
     void FinalizeSetup() override;
     void* HostAddrOf(size_t rank) const override;
+    size_t HostMappedBytesOf(size_t rank) const override;
     void* DeviceAddrOf(size_t rank) const override;
     void* HostMappedDeviceAddrOf(size_t rank) const override;
     void Reset() override;

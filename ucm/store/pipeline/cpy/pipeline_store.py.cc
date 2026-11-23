@@ -22,12 +22,14 @@
  * SOFTWARE.
  * */
 #include <list>
+#include <set>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <stdexcept>
 #include "config_parser.h"
 #include "detail/store_health_config.h"
 #include "health_breaker_store.h"
+#include "host_buffer.h"
 #include "library_loader.h"
 #include "ucmstore_v1.h"
 
@@ -80,6 +82,7 @@ class PipelineStore {
     std::list<StoreLoader> loaders_;
     std::list<std::shared_ptr<StoreV1>> stores_;
     std::list<std::shared_ptr<HealthBreakerStore>> healthBreakerStores_;
+    std::set<std::pair<StoreV1*, StoreV1*>> hostBufferLinks_;
     StoreV1* entry_{nullptr};
 
     StoreV1* StoreBack() const { return entry_; }
@@ -162,7 +165,31 @@ public:
     {
         for (auto& healthBreakerStore : healthBreakerStores_) { healthBreakerStore->Stop(); }
         healthBreakerStores_.clear();
+        /* Backend tasks must drain before Cache2 unmaps their source/target MRs. */
+        for (auto& store : stores_) {
+            auto consumer = dynamic_cast<Detail::HostBufferConsumer*>(store.get());
+            if (consumer != nullptr) { consumer->ShutdownHostBuffers(); }
+        }
         while (!stores_.empty()) { stores_.pop_back(); }
+    }
+    void AttachHostBuffers()
+    {
+        for (auto providerIt = stores_.begin(); providerIt != stores_.end(); ++providerIt) {
+            auto provider = dynamic_cast<Detail::HostBufferProvider*>(providerIt->get());
+            if (provider == nullptr) { continue; }
+            auto connect = [&](auto consumerIt) {
+                auto consumer = dynamic_cast<Detail::HostBufferConsumer*>(consumerIt->get());
+                if (consumer == nullptr) { return; }
+                const auto link = std::make_pair(providerIt->get(), consumerIt->get());
+                if (!hostBufferLinks_.insert(link).second) { return; }
+                auto spans = provider->HostBuffers();
+                if (!spans) { ThrowError(spans.Error()); }
+                ThrowIfFailed(consumer->RegisterHostBuffers(spans.Value()));
+            };
+            if (providerIt != stores_.begin()) { connect(std::prev(providerIt)); }
+            auto next = std::next(providerIt);
+            if (next != stores_.end()) { connect(next); }
+        }
     }
     void Stack(const std::string& name, const std::string& path, const py::dict& dict)
     {
@@ -185,6 +212,7 @@ public:
         loaders_.push_back(std::move(loader));
         stores_.push_back(std::move(store));
         entry_ = stores_.back().get();
+        AttachHostBuffers();
         // Posix tracks the health of each backend itself and fails fast when none is healthy,
         // so it does not need a store breaker.
         if (healthConfig.enabled && name != "Posix") {
@@ -192,9 +220,21 @@ public:
                 "pipeline/" + std::to_string(stores_.size() - 1) + ":" + stores_.back()->Readme();
             auto healthBreakerStore = std::make_shared<HealthBreakerStore>();
             ThrowIfFailed(healthBreakerStore->Setup(stores_.back().get(), storeId, healthConfig));
-            ThrowIfFailed(healthBreakerStore->Start());
+            const auto deferStart =
+                dynamic_cast<Detail::HostBufferConsumer*>(stores_.back().get()) != nullptr;
+            if (!deferStart) { ThrowIfFailed(healthBreakerStore->Start()); }
             healthBreakerStores_.push_back(std::move(healthBreakerStore));
             entry_ = healthBreakerStores_.back().get();
+        }
+    }
+    void FinalizeRegistration()
+    {
+        for (auto& store : stores_) {
+            auto consumer = dynamic_cast<Detail::HostBufferConsumer*>(store.get());
+            if (consumer != nullptr) { ThrowIfFailed(consumer->FinalizeRegistration()); }
+        }
+        for (auto& healthBreakerStore : healthBreakerStores_) {
+            ThrowIfFailed(healthBreakerStore->Start());
         }
     }
     uintptr_t Self() const { return (uintptr_t)(void*)StoreBack(); }
@@ -297,6 +337,7 @@ PYBIND11_MODULE(ucmpipelinestore, m)
     auto s = py::class_<PipelineStore, std::unique_ptr<PipelineStore>>(m, "PipelineStore");
     s.def(py::init<>());
     s.def("Stack", &PipelineStore::Stack);
+    s.def("FinalizeRegistration", &PipelineStore::FinalizeRegistration);
     s.def("Self", &PipelineStore::Self);
     s.def("Lookup", &PipelineStore::Lookup, py::arg("ids").noconvert());
     s.def("LookupOnPrefix", &PipelineStore::LookupOnPrefix, py::arg("ids").noconvert());

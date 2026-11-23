@@ -28,6 +28,7 @@
 #include <vector>
 #include "buffer_manager.h"
 #include "global_config.h"
+#include "host_buffer.h"
 #include "logger/logger.h"
 #include "trans/cuda/gdr/gdr_config.h"
 #include "trans_manager.h"
@@ -36,7 +37,7 @@
 
 namespace UC::Cache2 {
 
-class Store : public StoreV1 {
+class Store : public StoreV1, public Detail::HostBufferProvider {
     BufferManager<> bufferMgr_;
     std::unique_ptr<Trans::GdrKVBufferConfig> gpuKvBufferRegistrations_;
     TransManager<> transMgr_;
@@ -68,6 +69,10 @@ public:
         return Status::OK();
     }
     std::string Readme() const override { return "CacheStore"; }
+    Expected<std::vector<Detail::HostBufferSpan>> HostBuffers() override
+    {
+        return bufferMgr_.HostBuffers();
+    }
     Expected<std::vector<uint8_t>> Lookup(const Detail::BlockId* blocks, size_t num) override
     {
         return bufferMgr_.Lookup(blocks, num);

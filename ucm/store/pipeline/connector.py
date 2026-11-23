@@ -105,6 +105,10 @@ class UcmPipelineStore(UcmKVStoreBaseV1):
     def cc_store(self) -> int:
         return self.store_.Self()
 
+    def finalize_registration(self) -> None:
+        """Finalize process-wide backend MRs after all pipelines are created."""
+        self.store_.FinalizeRegistration()
+
     def lookup(self, block_ids: List[bytes]) -> List[bool]:
         flat = np.frombuffer(b"".join(block_ids), dtype=np.uint8)
         res = self.store_.Lookup(flat)
@@ -226,6 +230,15 @@ def _cache_empty_pipeline_builder(
     store_dir = Path(__file__).resolve().parent.parent
     pipeline.Stack("Empty", str(store_dir / "empty/libemptystore.so"), config)
     _preload_metrics(store_dir)
+    pipeline.Stack("Cache", str(store_dir / "cache/libcachestore.so"), config)
+
+
+def _cache_nds_pipeline_builder(
+    config: Dict[str, object], pipeline: ucmpipelinestore.PipelineStore
+):
+    store_dir = Path(__file__).resolve().parent.parent
+    _preload_metrics(store_dir)
+    pipeline.Stack("Nds", str(store_dir / "nds/libndsstore.so"), config)
     pipeline.Stack("Cache", str(store_dir / "cache/libcachestore.so"), config)
 
 
@@ -414,6 +427,7 @@ UcmPipelineStoreBuilder.register("Cache|Ds3fs", _cache_ds3fs_pipeline_builder)
 UcmPipelineStoreBuilder.register("Cache|Empty", _cache_empty_pipeline_builder)
 UcmPipelineStoreBuilder.register("Cache", _cache_pipeline_builder)
 UcmPipelineStoreBuilder.register("Cache|Posix", _cache_posix_pipeline_builder)
+UcmPipelineStoreBuilder.register("Cache|Nds", _cache_nds_pipeline_builder)
 UcmPipelineStoreBuilder.register("Empty", _empty_pipeline_builder)
 UcmPipelineStoreBuilder.register("Fake", _fake_pipeline_builder)
 UcmPipelineStoreBuilder.register("Posix", _posix_pipeline_builder)

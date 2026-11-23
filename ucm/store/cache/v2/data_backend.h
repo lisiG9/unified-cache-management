@@ -68,6 +68,12 @@ public:
     virtual void FinalizeSetup() = 0;
     /* Returns the CPU/IO-accessible segment address, nullptr if inaccessible. */
     virtual void* HostAddrOf(size_t rank) const = 0;
+    /* Actual host mapping length, which may exceed the logical slot region. */
+    virtual size_t HostMappedBytesOf(size_t rank) const
+    {
+        (void)rank;
+        return 0;
+    }
     /* Returns the device-accessible segment address, nullptr if unmapped. */
     virtual void* DeviceAddrOf(size_t rank) const = 0;
     /* Returns the device-visible alias of a host-accessible segment, nullptr

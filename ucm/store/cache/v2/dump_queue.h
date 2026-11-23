@@ -172,6 +172,7 @@ private:
         ctx.bufferHandles.reserve(task->desc.size());
         Detail::TaskDesc backendDesc;
         backendDesc.brief = "Cache2Backend";
+        backendDesc.memoryType = Detail::TaskDesc::MemoryType::DDR;
         size_t copiedShards = 0;
         s = GatherShards(stream, task, ctx, backendDesc, copiedShards);
         if (s.Failure()) [[unlikely]] { return s; }
