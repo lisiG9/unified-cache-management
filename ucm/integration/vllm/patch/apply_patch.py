@@ -307,6 +307,9 @@ def apply_all_patches() -> None:
             )
             import ucm.integration.vllm.patch.engine_core_startup_shutdown_patch
 
+        if (int(major), int(minor)) >= (0, 30):
+            import ucm.integration.vllm.patch.v0300.multi_connector_handshake_patch
+
         # vllm_ascend patches
         # Disable CpuAlloc.bind_memory BEFORE any cpu_binding_patch so that
         # bind_memory is a no-op before bind_threads replacement is installed.
@@ -413,9 +416,10 @@ def apply_all_patches() -> None:
                 import ucm.integration.vllm.patch.v0251.vllm_ascend.ascend_hybrid_cache_patch
                 import ucm.integration.vllm.patch.v0251.vllm_ascend.cpu_binding_patch
             case "0.30.0":
-                logger.info(
-                    "UCM patching vllm-ascend 0.30.0 for chunked-prefill alignment..."
-                )
+                logger.info("UCM patching vllm-ascend for chunked-prefill alignment...")
+                import ucm.integration.vllm.patch.v0300.vllm_ascend.mamba_block_aligned_split_patch
+            case "0.32.0":
+                logger.info("UCM patching vllm-ascend for chunked-prefill alignment...")
                 import ucm.integration.vllm.patch.v0300.vllm_ascend.mamba_block_aligned_split_patch
             case _:
                 pass
