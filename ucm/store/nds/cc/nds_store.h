@@ -55,6 +55,8 @@ public:
 private:
     Expected<Detail::TaskHandle> Submit(bool load, Detail::TaskDesc task);
     Expected<std::vector<NdsKey>> BlockKeys(const Detail::BlockId& block) const;
+    static void RecordLookup(size_t queryBlocks, size_t queryKeys, size_t hitBlocks,
+                             size_t hitKeys);
 
     NdsRuntime& runtime_;
     TransManager transMgr_;

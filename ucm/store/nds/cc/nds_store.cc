@@ -25,6 +25,7 @@
 #include <limits>
 #include <utility>
 #include "logger/logger.h"
+#include "metrics_api.h"
 #include "nds_config.h"
 
 namespace UC::Nds {
@@ -111,10 +112,24 @@ Expected<std::vector<NdsKey>> Store::BlockKeys(const Detail::BlockId& block) con
     return std::move(keys);
 }
 
+void Store::RecordLookup(size_t queryBlocks, size_t queryKeys, size_t hitBlocks, size_t hitKeys)
+{
+    Metrics::UpdateStats(NAME_TO_METRIC_ID("nds_lookup_query_blocks_total"),
+                         static_cast<double>(queryBlocks));
+    Metrics::UpdateStats(NAME_TO_METRIC_ID("nds_lookup_hit_blocks_total"),
+                         static_cast<double>(hitBlocks));
+    Metrics::UpdateStats(NAME_TO_METRIC_ID("nds_lookup_query_keys_total"),
+                         static_cast<double>(queryKeys));
+    Metrics::UpdateStats(NAME_TO_METRIC_ID("nds_lookup_hit_keys_total"),
+                         static_cast<double>(hitKeys));
+}
+
 Expected<std::vector<uint8_t>> Store::Lookup(const Detail::BlockId* blocks, size_t num)
 {
     if (num != 0 && blocks == nullptr) { return Status::InvalidParam("null NDS block array"); }
     std::vector<uint8_t> hits(num, false);
+    size_t hitBlocks = 0;
+    size_t hitKeys = 0;
     for (size_t i = 0; i < num; ++i) {
         auto keys = BlockKeys(blocks[i]);
         if (!keys) { return keys.Error(); }
@@ -123,8 +138,11 @@ Expected<std::vector<uint8_t>> Store::Lookup(const Detail::BlockId* blocks, size
         if (static_cast<size_t>(ret.Value()) > keys.Value().size()) {
             return Status::Error("NDS::isExists returned an invalid prefix count");
         }
+        hitKeys += static_cast<size_t>(ret.Value());
         hits[i] = static_cast<size_t>(ret.Value()) == keys.Value().size();
+        if (hits[i] != 0) { ++hitBlocks; }
     }
+    RecordLookup(num, num * shardsPerBlock_, hitBlocks, hitKeys);
     return std::move(hits);
 }
 
@@ -144,12 +162,17 @@ Expected<ssize_t> Store::LookupOnPrefix(const Detail::BlockId* blocks, size_t nu
     if (static_cast<size_t>(ret.Value()) > keys.size()) {
         return Status::Error("NDS::isExists returned an invalid prefix count");
     }
-    return static_cast<ssize_t>(ret.Value() / shardsPerBlock_) - 1;
+    const auto hitBlocks = static_cast<size_t>(ret.Value()) / shardsPerBlock_;
+    RecordLookup(num, keys.size(), hitBlocks, static_cast<size_t>(ret.Value()));
+    return static_cast<ssize_t>(hitBlocks) - 1;
 }
 
 Expected<ssize_t> Store::LookupOnReverse(const Detail::BlockId* blocks, size_t num)
 {
     if (num != 0 && blocks == nullptr) { return Status::InvalidParam("null NDS block array"); }
+    size_t queryBlocks = 0;
+    size_t queryKeys = 0;
+    size_t hitKeys = 0;
     for (ssize_t i = static_cast<ssize_t>(num) - 1; i >= 0; --i) {
         auto keys = BlockKeys(blocks[i]);
         if (!keys) { return keys.Error(); }
@@ -158,8 +181,15 @@ Expected<ssize_t> Store::LookupOnReverse(const Detail::BlockId* blocks, size_t n
         if (static_cast<size_t>(ret.Value()) > keys.Value().size()) {
             return Status::Error("NDS::isExists returned an invalid prefix count");
         }
-        if (static_cast<size_t>(ret.Value()) == keys.Value().size()) { return ssize_t{i}; }
+        ++queryBlocks;
+        queryKeys += keys.Value().size();
+        hitKeys += static_cast<size_t>(ret.Value());
+        if (static_cast<size_t>(ret.Value()) == keys.Value().size()) {
+            RecordLookup(queryBlocks, queryKeys, 1, hitKeys);
+            return ssize_t{i};
+        }
     }
+    RecordLookup(queryBlocks, queryKeys, 0, hitKeys);
     return ssize_t{-1};
 }
 

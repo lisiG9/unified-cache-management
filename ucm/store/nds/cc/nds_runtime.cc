@@ -26,6 +26,7 @@
 #include <cstring>
 #include <limits>
 #include <utility>
+#include "metrics_api.h"
 
 namespace UC::Nds {
 namespace {
@@ -316,10 +317,18 @@ Status NdsRuntime::Transfer(size_t storeId, bool load, const std::vector<NdsKey>
     const auto ret = load ? client_->BatchGet(lows, highs, ioAddrs, offsets, lengths, nsids)
                           : client_->BatchPut(lows, highs, ioAddrs, offsets, lengths, nsids);
     if (ret != 0) {
+        if (load) {
+            Metrics::UpdateStats(NAME_TO_METRIC_ID("nds_load_failed_keys_total"),
+                                 static_cast<double>(keys.size()));
+        }
         return Status::Error(std::string{"NDS::batch"} + (load ? "Get" : "Put") + " returned " +
                              std::to_string(ret));
     }
     if (load) {
+        Metrics::UpdateStats(NAME_TO_METRIC_ID("nds_load_success_keys_total"),
+                             static_cast<double>(keys.size()));
+        Metrics::UpdateStats(NAME_TO_METRIC_ID("nds_load_success_bytes_total"),
+                             static_cast<double>(keys.size() * config.shardSize));
         size_t leaseIndex = 0;
         for (const auto& [index, original] : staged) {
             (void)index;

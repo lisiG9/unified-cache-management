@@ -79,6 +79,35 @@
 - Scheduler 按 GLM direct whole-block 的 `N=1` 补齐 `shard_size=block_size`。
 - 若未来扩展多 Pool，需要把 finalize 移到“本进程全部 Pool/Store 创建完成之后”，不能简单在每个 Pool 初始化后各自 finalize；多 shard Scheduler 也需要显式传递真实 shard 几何，不能沿用当前的 N=1 假设。
 
+## 2.6 分层命中与读取指标
+
+原有指标已经覆盖：
+
+- HBM：`gpu_hbm_hit_tokens_total`、`gpu_hbm_hit_blocks_total`。
+- Cache2：`cache_lookup_hit_blocks_total`、`cache_lookup_miss_blocks_total`。
+- Cache2/Posix：还存在 shard 级 Load 来源指标；旧的 `cache_posix_load_success_shards_total` 实际承载一般 backend 来源，不应拿它替代精确的 NDS key 统计。
+
+本次新增 NDS 独立指标：
+
+| 指标 | 口径 |
+|---|---|
+| `nds_lookup_query_blocks_total` | 实际向 NDS 查询的 block 数；Reverse 只计算停止前实际执行的调用 |
+| `nds_lookup_hit_blocks_total` | 所有 shard 均存在的完整 block 命中数 |
+| `nds_lookup_query_keys_total` | Lookup/Prefix/Reverse 实际送入 `isExists` 的 key 数 |
+| `nds_lookup_hit_keys_total` | `isExists` 返回存在的 key 数，包括不完整 block 内的命中 shard |
+| `nds_load_success_keys_total` | `batchGet` 成功完成后读取的 key 数 |
+| `nds_load_success_bytes_total` | 成功读取的 payload 字节数 |
+| `nds_load_failed_keys_total` | `batchGet` 非零返回涉及的 key 数 |
+
+一个 block 的一个 shard 对应一个 NDS key。指标是实际调用次数，不是全局去重 key 数；同一 key 多次 Lookup 会重复计数。部分 block 命中应看 key 指标，完整前缀复用应看 block 指标。NDS Load 指标只统计成功完成的 `batchGet`，不包含 HBM 或 Cache2 本地命中。
+
+指标已进入 `ucm/default_metrics_config.py` 和 `examples/metrics/metrics_configs.yaml`，可通过 `/metrics`、Prometheus 和终端视图按 worker 汇总，不逐 key 打日志。例如：
+
+```promql
+sum by (worker_id) (rate(ucm:nds_load_success_bytes_total[1m]))
+sum(rate(ucm:nds_lookup_hit_blocks_total[5m])) / sum(rate(ucm:nds_lookup_query_blocks_total[5m]))
+```
+
 ## 3. 主要文件
 
 | 文件 | 作用 |
@@ -104,6 +133,7 @@
 - `BUILD_UCM_PIPELINE`：默认 ON，可在纯原生 fake 测试中关闭 Pipeline。
 - `ndscore` 是 OBJECT library，生产 `libndsstore.so` 会包含 `MakeNdsStore` 导出符号。
 - 给项目原有纯头文件 OBJECT 库显式设置 `LINKER_LANGUAGE=CXX`，解决 CMake 4.4 配置错误。
+- NDS 插件使用 `libmetrics.so`，安装 RPATH 同时包含 `$ORIGIN` 和 `$ORIGIN/../../shared/metrics`。
 
 ## 4. 已完成验证
 
@@ -137,7 +167,9 @@ python .agents/skills/wsl-linux-testing/scripts/wsl_run.py --shell -- \
 
 - `test/test_load_task_options.py`：**10/10 通过**。
 - `test/test_cp_topology.py`：**28/28 通过**，包括新增的 Scheduler finalize 和 N=1 shard_size 用例。
+- NDS 配置、HBM 和 Posix 指标专项回归：**3/3 通过**；默认配置与示例 YAML 的 7 个 NDS 条目逐项一致。
 - `py_compile`、YAML 解析和 `git diff --check` 通过。
+- 全量默认配置一致性测试在基线 `b7a8610` 上原本就存在 4 个 counter、2 个 histogram 差异；该旧问题不属于本次 NDS 改动。
 
 ```bash
 python .agents/skills/wsl-linux-testing/scripts/wsl_run.py --shell -- \
@@ -190,7 +222,7 @@ ctest --test-dir build -R Nds --output-on-failure
 ```text
 请继续 UCM 私仓 open_source/_git_ucm 的 feat/nds-store-glm51-direct 分支，先读 docs/ucm-nds-glm51-direct-handoff.md。
 
-当前已完成 Cache|Nds 第一版原生实现：不依赖 Python pynds_kv，直接调用 libndskv.so 的 NDS:: 80-bit C++ API；Cache2 host span 导出、一次 initMulti、direct/staging、Connector finalize、异步任务和 fake 测试均已落地。WSL 的 12 个 NDS C++ 用例和 38 个 Python 用例全部通过，Cache2/Pipeline 与真实客户端编译通过。
+当前已完成 Cache|Nds 第一版原生实现：不依赖 Python pynds_kv，直接调用 libndskv.so 的 NDS:: 80-bit C++ API；Cache2 host span 导出、一次 initMulti、direct/staging、Connector finalize、异步任务和 fake 测试均已落地。新增 NDS Lookup block/key 命中指标和 batchGet 成功读取 key/字节指标，配合现有 HBM、Cache2 指标可按层分析命中与读取。WSL 的 12 个 NDS C++ 用例、38 个既有 Python 用例及 3 个指标专项用例全部通过，Cache2/Pipeline 与真实客户端编译通过。
 
 尚未完成真实 libndskv.so 链接、盘框 I/O 和 GLM 端到端验证。请先核对当前分支和文档，再在服务器执行生产构建、direct_only 冷写热读、重启命中、TP8 并发与故障测试；不要改写成 Python backend，不要绕过 Cache2 direct 布局，也不要把现有 SDK destroy_all_connection() 当作可靠热重建接口。
 ```

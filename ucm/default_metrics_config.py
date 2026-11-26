@@ -159,6 +159,34 @@ _COUNTER_METRICS = [
         "Blocks found by Posix lookup",
     ),
     (
+        "nds_lookup_query_blocks_total",
+        "Blocks submitted to NDS lookup; reverse lookup counts only actual calls",
+    ),
+    (
+        "nds_lookup_hit_blocks_total",
+        "Blocks fully hit by NDS lookup; repeated queries are counted separately",
+    ),
+    (
+        "nds_lookup_query_keys_total",
+        "Keys submitted to NDS isExists across lookup, prefix and reverse calls",
+    ),
+    (
+        "nds_lookup_hit_keys_total",
+        "Keys reported present by NDS isExists, including partial blocks",
+    ),
+    (
+        "nds_load_success_keys_total",
+        "Keys successfully read by completed NDS batchGet calls",
+    ),
+    (
+        "nds_load_success_bytes_total",
+        "Payload bytes successfully read by completed NDS batchGet calls",
+    ),
+    (
+        "nds_load_failed_keys_total",
+        "Keys in NDS batchGet calls returning a nonzero status",
+    ),
+    (
         "posix_healthy_count_total",
         "Number of successful Posix health probes",
     ),

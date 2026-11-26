@@ -833,6 +833,30 @@ def test_default_metrics_config_matches_example_yaml():
     assert DEFAULT_METRICS_CONFIG == _load_example_metrics_config_without_yaml()
 
 
+def test_nds_metrics_config_matches_example_yaml():
+    names = {
+        "nds_lookup_query_blocks_total",
+        "nds_lookup_hit_blocks_total",
+        "nds_lookup_query_keys_total",
+        "nds_lookup_hit_keys_total",
+        "nds_load_success_keys_total",
+        "nds_load_success_bytes_total",
+        "nds_load_failed_keys_total",
+    }
+    default = {
+        item["name"]: item["documentation"]
+        for item in DEFAULT_METRICS_CONFIG["counter"]
+        if item["name"] in names
+    }
+    example = {
+        item["name"]: item["documentation"]
+        for item in _load_example_metrics_config_without_yaml()["counter"]
+        if item["name"] in names
+    }
+    assert default == example
+    assert names == set(default)
+
+
 def test_posix_lookup_metrics_record_queries_and_returned_hits():
     source = (
         REPO_ROOT / "ucm" / "store" / "posix" / "cc" / "posix_store.cc"

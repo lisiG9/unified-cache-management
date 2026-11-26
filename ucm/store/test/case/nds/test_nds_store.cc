@@ -26,10 +26,12 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <string>
 #include <unistd.h>
 #include "fake_nds_client.h"
+#include "metrics_api.h"
 #include "nds/cc/nds_store.h"
 
 namespace UC::Nds::Test {
@@ -63,8 +65,20 @@ Detail::TaskDesc TaskFor(const Detail::BlockId& block, void* addr, size_t shard 
 
 class NdsStoreTest : public ::testing::Test {
 protected:
+    static void SetUpTestSuite()
+    {
+        Metrics::SetUp();
+        Metrics::CreateStats("nds_lookup_query_blocks_total", "counter");
+        Metrics::CreateStats("nds_lookup_hit_blocks_total", "counter");
+        Metrics::CreateStats("nds_lookup_query_keys_total", "counter");
+        Metrics::CreateStats("nds_lookup_hit_keys_total", "counter");
+        Metrics::CreateStats("nds_load_success_keys_total", "counter");
+        Metrics::CreateStats("nds_load_success_bytes_total", "counter");
+        Metrics::CreateStats("nds_load_failed_keys_total", "counter");
+    }
     void SetUp() override
     {
+        Metrics::GetAllStatsAndClear();
         auto& runtime = NdsRuntime::Instance();
         runtime.ResetForTest();
         auto client = std::make_unique<FakeNdsClient>();
@@ -110,6 +124,17 @@ protected:
         return store;
     }
 
+    void ExpectCounters(const std::map<std::string, double>& expected)
+    {
+        auto stats = Metrics::GetAllStatsAndClear();
+        const auto& counters = std::get<0>(stats);
+        for (const auto& [name, value] : expected) {
+            const auto it = counters.find(name);
+            const auto actual = it == counters.end() ? 0.0 : it->second;
+            EXPECT_EQ(actual, value) << "metric=" << name;
+        }
+    }
+
     FakeNdsClient* client_{nullptr};
     std::filesystem::path directory_{};
     std::string configPath_{};
@@ -145,6 +170,15 @@ TEST_F(NdsStoreTest, DirectDumpLookupAndLoadRoundTrip)
     EXPECT_TRUE(hits.Value()[0]);
     EXPECT_EQ(NdsRuntime::Instance().DirectShardsForTest(), 2);
     EXPECT_EQ(NdsRuntime::Instance().StagingShardsForTest(), 0);
+    ExpectCounters({
+        {"nds_lookup_query_blocks_total", 1},
+        {"nds_lookup_hit_blocks_total", 1},
+        {"nds_lookup_query_keys_total", 1},
+        {"nds_lookup_hit_keys_total", 1},
+        {"nds_load_success_keys_total", 1},
+        {"nds_load_success_bytes_total", bytes},
+        {"nds_load_failed_keys_total", 0},
+    });
 }
 
 TEST_F(NdsStoreTest, LookupPrefixAndReverseKeepTheirDistinctSemantics)
@@ -173,6 +207,12 @@ TEST_F(NdsStoreTest, LookupPrefixAndReverseKeepTheirDistinctSemantics)
     auto reverse = store->LookupOnReverse(blocks, 3);
     ASSERT_TRUE(reverse);
     EXPECT_EQ(reverse.Value(), 2);
+    ExpectCounters({
+        {"nds_lookup_query_blocks_total", 7},
+        {"nds_lookup_hit_blocks_total", 4},
+        {"nds_lookup_query_keys_total", 7},
+        {"nds_lookup_hit_keys_total", 4},
+    });
 }
 
 TEST_F(NdsStoreTest, FailedLoadDoesNotChangeTargetBuffer)
@@ -196,6 +236,11 @@ TEST_F(NdsStoreTest, FailedLoadDoesNotChangeTargetBuffer)
     ASSERT_TRUE(load);
     EXPECT_TRUE(store->Wait(load.Value()).Failure());
     for (size_t i = 0; i < bytes; ++i) { EXPECT_EQ(base[bytes + i], 0x33); }
+    ExpectCounters({
+        {"nds_load_success_keys_total", 0},
+        {"nds_load_success_bytes_total", 0},
+        {"nds_load_failed_keys_total", 1},
+    });
 }
 
 TEST_F(NdsStoreTest, MultipleStoresInitializeOnceAndSchedulerIsLookupOnly)
