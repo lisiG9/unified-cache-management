@@ -59,6 +59,10 @@ if TYPE_CHECKING:
 logger = init_logger(__name__)
 
 
+def _hla_dump_diag_flag(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _kv_cache_tensor_layers(raw_tensor) -> list[str]:
     """Read layer names from both new and legacy vLLM tensor descriptors."""
     names = getattr(raw_tensor, "layers", None)
@@ -3047,8 +3051,23 @@ class UCMHybridLinearAttentionConnector(UCMDirectConnector, SupportsHMA):
         if not self._connector_metadata:
             self._dump_plan = None
             return
+        timing_enabled = _hla_dump_diag_flag("UCM_HLA_DUMP_TIMING")
+        event_noop = _hla_dump_diag_flag("UCM_HLA_DUMP_EVENT_NOOP")
+        timing_stats: dict[str, float] = {}
+        if event_noop and not getattr(self, "_dump_event_noop_warned", False):
+            logger.warning(
+                "UCM_HLA_DUMP_EVENT_NOOP=1 disables HLA dump event recording "
+                "WITHOUT a fallback synchronize. Use only when D2H dump is "
+                "independently disabled; persisted KV correctness is not guaranteed."
+            )
+            self._dump_event_noop_warned = True
         try:
+            stage_start = time.perf_counter() if timing_enabled else 0.0
             plan = self._ensure_dump_plan()
+            if timing_enabled:
+                timing_stats["connector_hla_dump_plan_duration_ms"] = (
+                    time.perf_counter() - stage_start
+                ) * 1000
             (
                 scoped_ucm_ids,
                 scoped_vllm_ids,
@@ -3066,9 +3085,20 @@ class UCMHybridLinearAttentionConnector(UCMDirectConnector, SupportsHMA):
             )
             event_handle = 0
             try:
+                stage_start = time.perf_counter() if timing_enabled else 0.0
                 ptrs = layout.extract_block_addrs(scoped_vllm_ids, scoped_group_ids)
-                event_handle = self._get_event_handle()
+                if timing_enabled:
+                    timing_stats["connector_hla_dump_extract_addrs_duration_ms"] = (
+                        time.perf_counter() - stage_start
+                    ) * 1000
+                stage_start = time.perf_counter() if timing_enabled else 0.0
+                event_handle = 0 if event_noop else self._get_event_handle()
+                if timing_enabled:
+                    timing_stats["connector_hla_dump_event_record_duration_ms"] = (
+                        time.perf_counter() - stage_start
+                    ) * 1000
                 save_start_time = time.perf_counter() * 1000
+                stage_start = time.perf_counter() if timing_enabled else 0.0
                 task = self._rank_consistency.submit_dump(
                     self.store,
                     block_ids_by_request,
@@ -3077,13 +3107,23 @@ class UCMHybridLinearAttentionConnector(UCMDirectConnector, SupportsHMA):
                     ptrs,
                     event_handle,
                 )
+                if timing_enabled:
+                    timing_stats["connector_hla_dump_submit_duration_ms"] = (
+                        time.perf_counter() - stage_start
+                    ) * 1000
             except Exception as e:
                 logger.error(f"dump kv cache failed. {type(e).__name__}: {e}")
+                stage_start = time.perf_counter() if timing_enabled else 0.0
                 if self.enable_event_sync and event_handle and self.device is not None:
                     self.device.destroy_event_handle(event_handle)
+                if timing_enabled:
+                    timing_stats["connector_hla_dump_event_destroy_duration_ms"] = (
+                        time.perf_counter() - stage_start
+                    ) * 1000
                 self._rank_consistency.finish_dump(set(block_ids_by_request))
                 return
 
+            wait_start = time.perf_counter() if timing_enabled else 0.0
             try:
                 self._rank_consistency.wait_dump(task)
                 save_end_time = time.perf_counter() * 1000
@@ -3094,8 +3134,17 @@ class UCMHybridLinearAttentionConnector(UCMDirectConnector, SupportsHMA):
                 self._rank_consistency.finish_dump(set(block_ids_by_request))
                 return
             finally:
+                if timing_enabled:
+                    timing_stats["connector_hla_dump_wait_duration_ms"] = (
+                        time.perf_counter() - wait_start
+                    ) * 1000
+                stage_start = time.perf_counter() if timing_enabled else 0.0
                 if self.enable_event_sync and event_handle and self.device is not None:
                     self.device.destroy_event_handle(event_handle)
+                if timing_enabled:
+                    timing_stats["connector_hla_dump_event_destroy_duration_ms"] = (
+                        time.perf_counter() - stage_start
+                    ) * 1000
 
             self._rank_consistency.finish_dump(set(block_ids_by_request))
             ucmmetrics.update_stats(
@@ -3105,6 +3154,8 @@ class UCMHybridLinearAttentionConnector(UCMDirectConnector, SupportsHMA):
                 }
             )
         finally:
+            if timing_stats:
+                ucmmetrics.update_stats(timing_stats)
             self._dump_tasks.clear()
             self._dump_plan = None
             self._dumped_layers.clear()

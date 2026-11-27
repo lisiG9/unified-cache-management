@@ -870,6 +870,21 @@ _HISTOGRAM_METRICS = [
         "Time spent blocked while confirming async UCM connector dump completion (ms)",
         [0, 1, 2, 5, 10, 20, 50, 100, 150, 200, 250, 300, 350, 400, 550, 600, 750, 800, 850, 900, 950, 1000],
     ),
+    *[
+        (
+            f"connector_hla_dump_{stage}_duration_ms",
+            f"HLA direct dump {stage.replace('_', ' ')} duration (ms); emitted only when UCM_HLA_DUMP_TIMING is enabled",
+            [0, 0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 30000, 60000],
+        )
+        for stage in (
+            "plan",
+            "extract_addrs",
+            "event_record",
+            "submit",
+            "wait",
+            "event_destroy",
+        )
+    ],
     (
         "interval_lookup_hit_rates",
         "Hit rates of ucm lookup requests",

@@ -82,6 +82,17 @@ CONNECTOR_METHODS = (
 CONNECTOR_HISTOGRAMS = (
     ("save_duration", "ms"),
     ("save_completion_wait_duration", "ms"),
+    *(
+        (f"connector_hla_dump_{stage}_duration_ms", "ms")
+        for stage in (
+            "plan",
+            "extract_addrs",
+            "event_record",
+            "submit",
+            "wait",
+            "event_destroy",
+        )
+    ),
     *((f"connector_{method}_duration_ms", "ms") for method in CONNECTOR_METHODS),
 )
 

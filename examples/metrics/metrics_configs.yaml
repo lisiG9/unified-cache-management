@@ -595,6 +595,24 @@ histogram:
   - name: "save_completion_wait_duration"
     documentation: "Time spent blocked while confirming async UCM connector dump completion (ms)"
     buckets: [0, 1, 2, 5, 10, 20, 50, 100, 150, 200, 250, 300, 350, 400, 550, 600, 750, 800, 850, 900, 950, 1000]
+  - name: "connector_hla_dump_plan_duration_ms"
+    documentation: "HLA direct dump plan duration (ms); emitted only when UCM_HLA_DUMP_TIMING is enabled"
+    buckets: [0, 0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 30000, 60000]
+  - name: "connector_hla_dump_extract_addrs_duration_ms"
+    documentation: "HLA direct dump extract addrs duration (ms); emitted only when UCM_HLA_DUMP_TIMING is enabled"
+    buckets: [0, 0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 30000, 60000]
+  - name: "connector_hla_dump_event_record_duration_ms"
+    documentation: "HLA direct dump event record duration (ms); emitted only when UCM_HLA_DUMP_TIMING is enabled"
+    buckets: [0, 0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 30000, 60000]
+  - name: "connector_hla_dump_submit_duration_ms"
+    documentation: "HLA direct dump submit duration (ms); emitted only when UCM_HLA_DUMP_TIMING is enabled"
+    buckets: [0, 0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 30000, 60000]
+  - name: "connector_hla_dump_wait_duration_ms"
+    documentation: "HLA direct dump wait duration (ms); emitted only when UCM_HLA_DUMP_TIMING is enabled"
+    buckets: [0, 0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 30000, 60000]
+  - name: "connector_hla_dump_event_destroy_duration_ms"
+    documentation: "HLA direct dump event destroy duration (ms); emitted only when UCM_HLA_DUMP_TIMING is enabled"
+    buckets: [0, 0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 30000, 60000]
   - name: "interval_lookup_hit_rates"
     documentation: "Hit rates of ucm lookup requests"
     buckets: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
