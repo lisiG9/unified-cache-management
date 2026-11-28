@@ -13,6 +13,11 @@ ucm_connectors:
     ucm_connector_config:
       store_pipeline: "Cache|Nds"
       nds_config_path: "/etc/nds/nds_config.conf"
+      # 0: keep the shared start_core. >0: workers use local_rank * stride;
+      # the scheduler uses (local worker count) * stride as its separate slot.
+      # Derived configs are written beside nds_config_path. With core_num=1,
+      # reserve at least two cores per NDS client (for example, stride=2).
+      nds_core_stride: 0
       nds_nsid: 11
       nds_mr_policy: "direct"  # direct | direct_only | staging
       nds_staging_capacity_gb: 16  # one shared allocation per process

@@ -727,7 +727,8 @@ class NdsStoreCreationTests(unittest.TestCase):
             n
             for n in connector.body
             if isinstance(n, ast.FunctionDef)
-            and n.name in {"_create_store", "_create_store_impl"}
+            and n.name
+            in {"_create_store", "_create_store_impl", "_configure_nds_core_layout"}
         ]
         node = ast.ClassDef(
             name="DirectConnector", bases=[], keywords=[], body=methods, decorator_list=[]

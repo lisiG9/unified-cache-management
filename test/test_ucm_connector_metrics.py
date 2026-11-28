@@ -2857,6 +2857,91 @@ def test_direct_store_init_tolerates_unsupported_affinity_api(monkeypatch):
     assert connector._create_store(None) is store
 
 
+def _create_nds_stride_connector(role, local_rank):
+    connector = object.__new__(UCMDirectConnector)
+    connector._role = role
+    connector.local_rank = local_rank
+    connector._get_world_size = lambda: 8
+    return connector
+
+
+def test_nds_core_stride_uses_worker_local_rank(monkeypatch):
+    connector = _create_nds_stride_connector(KVConnectorRole.WORKER, 3)
+    materialize = Mock(return_value="/etc/nds/nds_config.core8.conf")
+    monkeypatch.setattr(
+        ucm_connector_module, "materialize_per_rank_nds_config", materialize
+    )
+    config = {
+        "store_pipeline": "Cache|Nds",
+        "nds_config_path": "/etc/nds/nds_config.conf",
+        "nds_core_stride": 2,
+    }
+
+    connector._configure_nds_core_layout(config)
+
+    materialize.assert_called_once_with("/etc/nds/nds_config.conf", 6)
+    assert config["nds_config_path"] == "/etc/nds/nds_config.core8.conf"
+    assert "nds_core_stride" not in config
+
+
+def test_nds_core_stride_gives_scheduler_separate_slot(monkeypatch):
+    connector = _create_nds_stride_connector(KVConnectorRole.SCHEDULER, -1)
+    materialize = Mock(return_value="/etc/nds/nds_config.core18.conf")
+    monkeypatch.setattr(
+        ucm_connector_module, "materialize_per_rank_nds_config", materialize
+    )
+    config = {
+        "store_pipeline": "Cache|Nds",
+        "nds_config_path": "/etc/nds/nds_config.conf",
+        "nds_core_stride": 2,
+    }
+
+    connector._configure_nds_core_layout(config)
+
+    materialize.assert_called_once_with("/etc/nds/nds_config.conf", 16)
+    assert config["nds_config_path"] == "/etc/nds/nds_config.core18.conf"
+
+
+def test_nds_core_stride_zero_preserves_base_config(monkeypatch):
+    connector = _create_nds_stride_connector(KVConnectorRole.WORKER, 3)
+    materialize = Mock()
+    monkeypatch.setattr(
+        ucm_connector_module, "materialize_per_rank_nds_config", materialize
+    )
+    config = {
+        "store_pipeline": "Cache|Nds",
+        "nds_config_path": "/etc/nds/nds_config.conf",
+        "nds_core_stride": 0,
+    }
+
+    connector._configure_nds_core_layout(config)
+
+    materialize.assert_not_called()
+    assert config["nds_config_path"] == "/etc/nds/nds_config.conf"
+    assert "nds_core_stride" not in config
+
+
+@pytest.mark.parametrize("stride", [-1, 1.5, True])
+def test_nds_core_stride_rejects_invalid_values(stride):
+    connector = _create_nds_stride_connector(KVConnectorRole.WORKER, 0)
+    config = {
+        "store_pipeline": "Cache|Nds",
+        "nds_config_path": "/etc/nds/nds_config.conf",
+        "nds_core_stride": stride,
+    }
+
+    with pytest.raises(ValueError, match="non-negative integer"):
+        connector._configure_nds_core_layout(config)
+
+
+def test_nds_core_stride_requires_config_path():
+    connector = _create_nds_stride_connector(KVConnectorRole.WORKER, 0)
+    config = {"store_pipeline": "Cache|Nds", "nds_core_stride": 2}
+
+    with pytest.raises(ValueError, match="requires nds_config_path"):
+        connector._configure_nds_core_layout(config)
+
+
 def _create_metrics_test_store(monkeypatch, kind, launch_config, store_config):
     from ucm.integration.vllm.hla_connector import (
         UCMHybridLinearAttentionConnector,

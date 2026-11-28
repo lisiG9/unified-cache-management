@@ -58,6 +58,7 @@ from ucm.integration.vllm.metrics import (
     UCMConnectorStats,
     UCMPromMetrics,
 )
+from ucm.integration.vllm.nds_config import materialize_per_rank_nds_config
 from ucm.integration.vllm.rank_consistency import RankConsistencyManager
 from ucm.integration.vllm.request_hasher import RequestHasher
 from ucm.logger import init_logger
@@ -1910,6 +1911,26 @@ class UCMDirectConnector(KVConnectorBase_V1):
                         f"Failed to restore caller CPU affinity after store init: {e}"
                     )
 
+    def _configure_nds_core_layout(self, config: dict[str, Any]) -> None:
+        stride = config.pop("nds_core_stride", 0)
+        if isinstance(stride, bool) or not isinstance(stride, int) or stride < 0:
+            raise ValueError(f"nds_core_stride must be a non-negative integer: {stride}")
+        if stride == 0 or config.get("store_pipeline") != "Cache|Nds":
+            return
+        base_path = config.get("nds_config_path")
+        if not base_path:
+            raise ValueError("nds_core_stride requires nds_config_path")
+        slot = (
+            self.local_rank
+            if self._role == KVConnectorRole.WORKER
+            else self._get_world_size()
+        )
+        if slot < 0:
+            raise ValueError(f"Invalid NDS core slot: {slot}")
+        config["nds_config_path"] = materialize_per_rank_nds_config(
+            base_path, slot * stride
+        )
+
     def _create_store_impl(
         self,
         kv_cache_layout: Optional[KVCacheLayout],
@@ -1925,6 +1946,7 @@ class UCMDirectConnector(KVConnectorBase_V1):
         name = self.connector_configs[0]["ucm_connector_name"]
         module_path = self.connector_configs[0].get("ucm_connector_module_path", None)
         config = copy.deepcopy(self.connector_configs[0]["ucm_connector_config"])
+        self._configure_nds_core_layout(config)
         config.setdefault("share_buffer_enable", self.is_mla)
         config["local_rank_size"] = self._get_world_size()
         self._configure_numa_placement(config)
