@@ -723,22 +723,24 @@ class NdsStoreCreationTests(unittest.TestCase):
             for n in tree.body
             if isinstance(n, ast.ClassDef) and n.name == "UCMDirectConnector"
         )
-        method = next(
+        methods = [
             n
             for n in connector.body
-            if isinstance(n, ast.FunctionDef) and n.name == "_create_store"
-        )
+            if isinstance(n, ast.FunctionDef)
+            and n.name in {"_create_store", "_create_store_impl"}
+        ]
         node = ast.ClassDef(
-            name="DirectConnector", bases=[], keywords=[], body=[method], decorator_list=[]
+            name="DirectConnector", bases=[], keywords=[], body=methods, decorator_list=[]
         )
         store = SimpleNamespace(finalize_registration=Mock())
         factory = SimpleNamespace(create_connector=Mock(return_value=store))
         namespace = {
             "copy": copy,
+            "os": __import__("os"),
             "KVConnectorRole": SimpleNamespace(WORKER=object()),
             "_scheduler_read_block_size": lambda: 4096,
             "UcmConnectorFactoryV1": factory,
-            "logger": SimpleNamespace(info=lambda *args: None),
+            "logger": SimpleNamespace(info=lambda *args: None, warning=lambda *args: None),
         }
         code = ast.Module(
             body=[

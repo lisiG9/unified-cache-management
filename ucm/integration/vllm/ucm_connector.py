@@ -1889,6 +1889,32 @@ class UCMDirectConnector(KVConnectorBase_V1):
         kv_cache_layout: Optional[KVCacheLayout],
         cpu_affinity_cores: Optional[list[int]] = None,
     ) -> UcmKVStoreBaseV1:
+        """Create a store without leaking SDK affinity changes to its caller."""
+        try:
+            caller_affinity = os.sched_getaffinity(0)
+        except (AttributeError, OSError):
+            caller_affinity = None
+        try:
+            return self._create_store_impl(kv_cache_layout, cpu_affinity_cores)
+        finally:
+            if caller_affinity is not None:
+                try:
+                    if os.sched_getaffinity(0) != caller_affinity:
+                        os.sched_setaffinity(0, caller_affinity)
+                        logger.warning(
+                            "Store initialization changed caller CPU affinity; "
+                            "restored the original mask"
+                        )
+                except (AttributeError, OSError) as e:
+                    logger.warning(
+                        f"Failed to restore caller CPU affinity after store init: {e}"
+                    )
+
+    def _create_store_impl(
+        self,
+        kv_cache_layout: Optional[KVCacheLayout],
+        cpu_affinity_cores: Optional[list[int]] = None,
+    ) -> UcmKVStoreBaseV1:
         if len(self.connector_configs) != 1:
             raise RuntimeError(
                 f"Expected exactly one connector config, "

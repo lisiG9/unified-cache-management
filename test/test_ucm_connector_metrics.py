@@ -2790,6 +2790,73 @@ def test_hybrid_layerwise_records_save_bytes_once():
     assert connector.is_save is False
 
 
+def test_direct_store_init_restores_caller_affinity(monkeypatch):
+    connector = object.__new__(UCMDirectConnector)
+    store = object()
+    connector._create_store_impl = Mock(return_value=store)
+    original = {0, 1, 2, 3}
+    get_affinity = Mock(side_effect=[original, {2}])
+    set_affinity = Mock()
+    monkeypatch.setattr(
+        ucm_connector_module.os, "sched_getaffinity", get_affinity, raising=False
+    )
+    monkeypatch.setattr(
+        ucm_connector_module.os, "sched_setaffinity", set_affinity, raising=False
+    )
+
+    assert connector._create_store(None) is store
+    set_affinity.assert_called_once_with(0, original)
+
+
+def test_direct_store_init_leaves_unchanged_affinity_alone(monkeypatch):
+    connector = object.__new__(UCMDirectConnector)
+    connector._create_store_impl = Mock(return_value=object())
+    original = {0, 1, 2, 3}
+    get_affinity = Mock(side_effect=[original, original])
+    set_affinity = Mock()
+    monkeypatch.setattr(
+        ucm_connector_module.os, "sched_getaffinity", get_affinity, raising=False
+    )
+    monkeypatch.setattr(
+        ucm_connector_module.os, "sched_setaffinity", set_affinity, raising=False
+    )
+
+    connector._create_store(None)
+    set_affinity.assert_not_called()
+
+
+def test_direct_store_init_restores_affinity_on_failure(monkeypatch):
+    connector = object.__new__(UCMDirectConnector)
+    connector._create_store_impl = Mock(side_effect=RuntimeError("init failed"))
+    original = {0, 1, 2, 3}
+    get_affinity = Mock(side_effect=[original, {2}])
+    set_affinity = Mock()
+    monkeypatch.setattr(
+        ucm_connector_module.os, "sched_getaffinity", get_affinity, raising=False
+    )
+    monkeypatch.setattr(
+        ucm_connector_module.os, "sched_setaffinity", set_affinity, raising=False
+    )
+
+    with pytest.raises(RuntimeError, match="init failed"):
+        connector._create_store(None)
+    set_affinity.assert_called_once_with(0, original)
+
+
+def test_direct_store_init_tolerates_unsupported_affinity_api(monkeypatch):
+    connector = object.__new__(UCMDirectConnector)
+    store = object()
+    connector._create_store_impl = Mock(return_value=store)
+    monkeypatch.setattr(
+        ucm_connector_module.os,
+        "sched_getaffinity",
+        Mock(side_effect=AttributeError("unsupported")),
+        raising=False,
+    )
+
+    assert connector._create_store(None) is store
+
+
 def _create_metrics_test_store(monkeypatch, kind, launch_config, store_config):
     from ucm.integration.vllm.hla_connector import (
         UCMHybridLinearAttentionConnector,
