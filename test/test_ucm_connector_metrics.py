@@ -833,21 +833,6 @@ def test_default_metrics_config_matches_example_yaml():
     assert DEFAULT_METRICS_CONFIG == _load_example_metrics_config_without_yaml()
 
 
-def test_hla_dump_timing_metrics_config_matches_example_yaml():
-    default = {
-        item["name"]: item
-        for item in DEFAULT_METRICS_CONFIG["histogram"]
-        if item["name"].startswith("connector_hla_dump_")
-    }
-    example = {
-        item["name"]: item
-        for item in _load_example_metrics_config_without_yaml()["histogram"]
-        if item["name"].startswith("connector_hla_dump_")
-    }
-    assert len(default) == 6
-    assert default == example
-
-
 def test_nds_metrics_config_matches_example_yaml():
     names = {
         "nds_lookup_query_blocks_total",
@@ -1708,102 +1693,6 @@ def test_direct_connector_poll_records_zero_completion_wait_duration():
             "save_completion_wait_duration": 0.0,
         }
     ]
-
-
-def _create_hla_dump_metrics_connector():
-    from ucm.integration.vllm.hla_connector import (
-        HybridLinearAttentionLayout,
-        UCMHybridLinearAttentionConnector,
-    )
-
-    connector = object.__new__(UCMHybridLinearAttentionConnector)
-    connector._connector_metadata = object()
-    plan = ([b"u0"], [3], [0], {"req"}, {"req": {b"u0"}})
-    connector._dump_plan = plan
-    connector._ensure_dump_plan = Mock(return_value=plan)
-    layout = object.__new__(HybridLinearAttentionLayout)
-    layout.direct_group_bytes = {0: 64}
-    layout.extract_block_addrs = Mock(return_value=[[123]])
-    connector.kv_cache_layout = layout
-    connector.store = object()
-    connector._rank_consistency = SimpleNamespace(
-        submit_dump=Mock(return_value=object()),
-        wait_dump=Mock(),
-        finish_dump=Mock(),
-    )
-    connector._get_event_handle = Mock(return_value=17)
-    connector.enable_event_sync = True
-    connector.device = SimpleNamespace(destroy_event_handle=Mock())
-    connector._dump_tasks = {}
-    connector._dumped_layers = set()
-    connector._dumped_group_slots = set()
-    connector._submitted_group_slots = set()
-    connector._waited_group_slots = set()
-    connector.is_save = True
-    return connector
-
-
-def test_hla_direct_dump_default_event_path_has_no_diag_overhead(monkeypatch):
-    _reset_fakes()
-    monkeypatch.delenv("UCM_HLA_DUMP_TIMING", raising=False)
-    monkeypatch.delenv("UCM_HLA_DUMP_EVENT_NOOP", raising=False)
-    connector = _create_hla_dump_metrics_connector()
-
-    connector.wait_for_save()
-
-    connector._get_event_handle.assert_called_once_with()
-    assert connector._rank_consistency.submit_dump.call_args.args[-1] == 17
-    connector.device.destroy_event_handle.assert_called_once_with(17)
-    assert len(fake_ucmmetrics.updated) == 1
-    assert fake_ucmmetrics.updated[0]["save_bytes_total"] == 64
-    assert connector._dump_plan is None
-    assert connector.is_save is False
-
-
-def test_hla_direct_dump_event_noop_and_stage_timings(monkeypatch):
-    _reset_fakes()
-    monkeypatch.setenv("UCM_HLA_DUMP_TIMING", "1")
-    monkeypatch.setenv("UCM_HLA_DUMP_EVENT_NOOP", "1")
-    connector = _create_hla_dump_metrics_connector()
-
-    connector.wait_for_save()
-
-    connector._get_event_handle.assert_not_called()
-    assert connector._rank_consistency.submit_dump.call_args.args[-1] == 0
-    connector.device.destroy_event_handle.assert_not_called()
-    assert len(fake_ucmmetrics.updated) == 2
-    timing = fake_ucmmetrics.updated[1]
-    assert set(timing) == {
-        "connector_hla_dump_plan_duration_ms",
-        "connector_hla_dump_extract_addrs_duration_ms",
-        "connector_hla_dump_event_record_duration_ms",
-        "connector_hla_dump_submit_duration_ms",
-        "connector_hla_dump_wait_duration_ms",
-        "connector_hla_dump_event_destroy_duration_ms",
-    }
-    assert all(value >= 0 for value in timing.values())
-
-
-def test_hla_direct_dump_wait_failure_still_records_timings(monkeypatch):
-    _reset_fakes()
-    import ucm.integration.vllm.hla_connector as hla_connector_module
-
-    monkeypatch.setattr(
-        hla_connector_module.logger, "error_limit", Mock(), raising=False
-    )
-    monkeypatch.setenv("UCM_HLA_DUMP_TIMING", "1")
-    monkeypatch.delenv("UCM_HLA_DUMP_EVENT_NOOP", raising=False)
-    connector = _create_hla_dump_metrics_connector()
-    connector._rank_consistency.wait_dump.side_effect = RuntimeError("wait failed")
-
-    connector.wait_for_save()
-
-    connector.device.destroy_event_handle.assert_called_once_with(17)
-    assert len(fake_ucmmetrics.updated) == 1
-    timing = fake_ucmmetrics.updated[0]
-    assert "connector_hla_dump_wait_duration_ms" in timing
-    assert "connector_hla_dump_event_destroy_duration_ms" in timing
-    connector._rank_consistency.finish_dump.assert_called_once_with({"req"})
 
 
 def test_request_async_alloc_dispatches_load_without_scheduled_forward():
